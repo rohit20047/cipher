@@ -2,6 +2,7 @@ import {expect} from 'chai'
 import {mkdir, readFile, rm, writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import path from 'node:path'
+import {createSandbox, type SinonSandbox} from 'sinon'
 
 import type {IRuleTemplateService} from '../../../../src/server/core/interfaces/services/i-rule-template-service.js'
 
@@ -21,6 +22,7 @@ describe('ConnectorManager - autonomous attachment freshness (Hermes)', () => {
   let fileService: FsFileService
   let connectorManager: ConnectorManager
   let previousHermesHome: string | undefined
+  let sandbox: SinonSandbox
 
   beforeEach(async () => {
     testDir = path.join(tmpdir(), `brv-mgr-attach-${Date.now()}`)
@@ -34,9 +36,19 @@ describe('ConnectorManager - autonomous attachment freshness (Hermes)', () => {
     })
     previousHermesHome = process.env.HERMES_HOME
     process.env.HERMES_HOME = hermesHome
+    sandbox = createSandbox()
+    const originalRead = FsFileService.prototype.read
+    sandbox.stub(FsFileService.prototype, 'read').callsFake(async function (this: any, filePath: string) {
+      const content = await originalRead.call(this, filePath)
+      if (filePath.endsWith('.md')) {
+        return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+      }
+      return content
+    })
   })
 
   afterEach(async () => {
+    sandbox.restore()
     if (previousHermesHome === undefined) delete process.env.HERMES_HOME
     else process.env.HERMES_HOME = previousHermesHome
     await rm(testDir, {force: true, recursive: true})

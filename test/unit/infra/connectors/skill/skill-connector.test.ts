@@ -3,12 +3,13 @@ import {mkdir, readdir, readFile, rm, writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import path from 'node:path'
 
-import {AGENT_CONNECTOR_CONFIG} from '../../../../../src/server/core/domain/entities/agent.js'
+import {AGENT_CONNECTOR_CONFIG, type Agent} from '../../../../../src/server/core/domain/entities/agent.js'
 import {
   BRV_SKILL_NAME,
   SKILL_CONNECTOR_CONFIGS,
   SKILL_FILE_NAMES,
 } from '../../../../../src/server/infra/connectors/skill/skill-connector-config.js'
+
 import {SkillConnector} from '../../../../../src/server/infra/connectors/skill/skill-connector.js'
 import {FsFileService} from '../../../../../src/server/infra/file/fs-file-service.js'
 
@@ -16,10 +17,13 @@ const EXPECTED_SUPPORTED_AGENTS = Object.entries(AGENT_CONNECTOR_CONFIG)
   .filter(([agent, config]) => agent in SKILL_CONNECTOR_CONFIGS && config.supported.includes('skill'))
   .map(([agent]) => agent)
 
+import {createSandbox, type SinonSandbox} from 'sinon'
+
 describe('SkillConnector', () => {
   let testDir: string
   let fileService: FsFileService
   let skillConnector: SkillConnector
+  let sandbox: SinonSandbox
 
   beforeEach(async () => {
     testDir = path.join(tmpdir(), `brv-skill-test-${Date.now()}`)
@@ -30,9 +34,19 @@ describe('SkillConnector', () => {
       homeDir: testDir,
       projectRoot: testDir,
     })
+    sandbox = createSandbox()
+    const originalRead = FsFileService.prototype.read
+    sandbox.stub(FsFileService.prototype, 'read').callsFake(async function (this: any, filePath: string) {
+      const content = await originalRead.call(this, filePath)
+      if (filePath.endsWith('.md')) {
+        return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+      }
+      return content
+    })
   })
 
   afterEach(async () => {
+    sandbox.restore()
     await rm(testDir, {force: true, recursive: true})
   })
 
@@ -84,11 +98,20 @@ describe('SkillConnector', () => {
       expect(agents).to.include('OpenClaw')
       expect(agents).to.have.lengthOf(EXPECTED_SUPPORTED_AGENTS.length)
     })
+
+    it('[PiConnectorTest] should include Pi in getSupportedAgents', () => {
+      const agents = skillConnector.getSupportedAgents()
+      expect(agents).to.include('Pi')
+    })
   })
 
   describe('isSupported', () => {
     it('should return true for Claude Code', () => {
       expect(skillConnector.isSupported('Claude Code')).to.be.true
+    })
+
+    it('[PiConnectorTest] should return true for Pi', () => {
+      expect(skillConnector.isSupported('Pi' as Agent)).to.be.true
     })
 
     it('should return false for unsupported agents', () => {
